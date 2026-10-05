@@ -1,0 +1,6 @@
+{
+  "name": "தமிழ் ஜோதிடம் - Tamil Astrology Predictions",
+  "description": "பிறந்த தேதி மற்றும் இடத்தைக் கொண்டு துல்லியமான ராசிக் கட்டம், நவாம்சம், மற்றும் தமிழ் ஜோதிடப் பலன்களைக் கணிக்கும் செயலி.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
