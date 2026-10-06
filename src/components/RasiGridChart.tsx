@@ -1,16 +1,19 @@
 import React, { useState } from 'react';
-import { PlanetaryPosition, TAMIL_RASIS } from '../utils/astrologyEngine';
-import { Info, Sparkles } from 'lucide-react';
+import { PlanetaryPosition, DasaPeriod, TAMIL_RASIS } from '../utils/astrologyEngine';
+import { Info, Sparkles, Table2, Clock, Eye, ChevronDown, ChevronUp } from 'lucide-react';
 
 interface RasiGridChartProps {
   rasiChart: { [rasiIndex: number]: PlanetaryPosition[] };
   navamsaChart: { [rasiIndex: number]: PlanetaryPosition[] };
   lagnaRasiIndex: number;
   personName?: string;
+  allPlanets?: PlanetaryPosition[];
+  dasaTimeline?: DasaPeriod[];
+  ayanamshaStr?: string;
 }
 
 // Mapping of South Indian Grid (4x4) coordinates to Rasi Index
-// 12 outer boxes, center 4 boxes merged
+// 12 outer boxes in clockwise order from Pisces to Aquarius
 const GRID_CELLS: {
   row: number;
   col: number;
@@ -54,15 +57,19 @@ export const RasiGridChart: React.FC<RasiGridChartProps> = ({
   navamsaChart,
   lagnaRasiIndex,
   personName,
+  allPlanets = [],
+  dasaTimeline = [],
+  ayanamshaStr,
 }) => {
-  const [chartMode, setChartMode] = useState<'rasi' | 'navamsa' | 'both'>('both');
+  const [chartMode, setChartMode] = useState<'both' | 'rasi' | 'navamsa'>('both');
   const [selectedRasi, setSelectedRasi] = useState<number | null>(null);
+  const [showTable, setShowTable] = useState(true);
+  const [showDasaTable, setShowDasaTable] = useState(false);
 
   const activeChart = (mode: 'rasi' | 'navamsa') =>
     mode === 'rasi' ? rasiChart : navamsaChart;
 
   const getBhavamNumber = (rasiIdx: number) => {
-    // 1-based house calculation from Lagna
     let diff = rasiIdx - lagnaRasiIndex;
     if (diff < 0) diff += 12;
     return diff + 1;
@@ -78,13 +85,13 @@ export const RasiGridChart: React.FC<RasiGridChartProps> = ({
             <span className="text-[#b8860b]">☸</span>
             <span>{title}</span>
           </h3>
-          <span className="text-xs text-[#825e46]">
-            {type === 'rasi' ? 'ராசி நிலை' : 'நவாம்ச நிலை (D-9)'}
+          <span className="text-xs text-[#825e46] font-medium">
+            {type === 'rasi' ? 'ராசிக் கட்டம் (D-1)' : 'நவாம்சக் கட்டம் (D-9)'}
           </span>
         </div>
 
-        {/* 4x4 South Indian Astrology Grid */}
-        <div className="w-full max-w-[420px] aspect-square grid grid-cols-4 grid-rows-4 border-2 border-[#8b4513] bg-[#faf5eb] rounded-md overflow-hidden relative shadow-xs">
+        {/* 4x4 Traditional South Indian Astrology Grid */}
+        <div className="w-full max-w-[440px] aspect-square grid grid-cols-4 grid-rows-4 border-2 border-[#7a3e1d] bg-[#faf5eb] rounded-md overflow-hidden relative shadow-xs">
           {/* Outer 12 cells */}
           {GRID_CELLS.map((cell) => {
             const rasiInfo = TAMIL_RASIS[cell.rasiIndex];
@@ -103,7 +110,7 @@ export const RasiGridChart: React.FC<RasiGridChartProps> = ({
                 }}
                 className={`border border-[#8b4513]/40 p-1 md:p-1.5 flex flex-col justify-between transition-all cursor-pointer relative ${
                   isLagnaHouse
-                    ? 'bg-[#fcedd7]'
+                    ? 'bg-[#faebd7]/90'
                     : isSelected
                     ? 'bg-[#f4e2be]'
                     : 'hover:bg-[#f6ebd4]'
@@ -111,14 +118,14 @@ export const RasiGridChart: React.FC<RasiGridChartProps> = ({
               >
                 {/* Header: Sign name and House number */}
                 <div className="flex items-center justify-between text-[10px] md:text-[11px] leading-none border-b border-[#e4cb9c] pb-0.5">
-                  <span className="font-semibold text-[#5c2311]">
+                  <span className="font-bold text-[#5c2311]">
                     {rasiInfo.tamil}
                   </span>
                   <span
                     className={`font-mono text-[9px] px-1 rounded ${
                       isLagnaHouse
                         ? 'bg-[#b8860b] text-white font-bold'
-                        : 'text-[#8b4513]/70'
+                        : 'text-[#8b4513]/70 font-semibold'
                     }`}
                     title={BHAVAM_NAMES[bhavam]}
                   >
@@ -126,39 +133,50 @@ export const RasiGridChart: React.FC<RasiGridChartProps> = ({
                   </span>
                 </div>
 
-                {/* Planets inside this house */}
-                <div className="flex-1 flex flex-wrap gap-1 items-center justify-center content-center py-1">
+                {/* Planets inside this house with degrees and retrograde marking */}
+                <div className="flex-1 flex flex-col gap-0.5 justify-center py-1 overflow-hidden">
                   {planets.length === 0 ? (
-                    <span className="text-[#a48e78] text-[10px] italic">·</span>
+                    <span className="text-[#a48e78] text-[10px] italic text-center">·</span>
                   ) : (
                     planets.map((p, idx) => {
                       const isLagna = p.name === 'Lagna';
                       return (
                         <div
                           key={idx}
-                          className={`text-xs md:text-sm font-bold px-1 rounded leading-tight flex items-center gap-0.5 ${
+                          className={`text-[10px] sm:text-[11px] font-semibold px-1 py-0.5 rounded leading-tight flex items-center justify-between gap-1 ${
                             isLagna
-                              ? 'bg-[#b8860b] text-white shadow-xs'
+                              ? 'bg-[#b8860b] text-white font-bold shadow-2xs'
                               : p.name === 'Jupiter' || p.name === 'Venus'
-                              ? 'text-[#1d6b2c] font-bold bg-[#e8f5e9]'
+                              ? 'text-[#1b5e20] bg-[#e8f5e9]/90'
                               : p.name === 'Mars' || p.name === 'Sun'
-                              ? 'text-[#a71d2a] font-bold bg-[#ffebee]'
+                              ? 'text-[#b71c1c] bg-[#ffebee]/90'
                               : p.name === 'Saturn' || p.name === 'Rahu' || p.name === 'Ketu'
-                              ? 'text-[#263238] font-bold bg-[#eceff1]'
-                              : 'text-[#5d4037] bg-[#efebe9]'
+                              ? 'text-[#263238] bg-[#eceff1]/90'
+                              : 'text-[#4e342e] bg-[#efebe9]/90'
                           }`}
-                          title={`${p.tamilName} (${p.degreeInRasi}° - ${p.nakshatraTamil} பாதம் ${p.pada})`}
+                          title={`${p.tamilName} (${p.degreeInRasi}° - ${p.nakshatraTamil} பாதம் ${p.pada})${
+                            p.isRetrograde && !isLagna ? ' [வக்ரம்]' : ''
+                          }`}
                         >
-                          <span>{p.shortTamil}</span>
-                          {p.name === 'Moon' && <span className="text-[10px]">🌙</span>}
+                          <span className="font-bold whitespace-nowrap">
+                            {p.shortTamil}
+                            {p.isRetrograde && !isLagna && (
+                              <span className="text-[9px] text-[#c62828] font-bold ml-0.5">
+                                (வ)
+                              </span>
+                            )}
+                          </span>
+                          <span className="font-mono text-[9px] opacity-80 whitespace-nowrap">
+                            {p.degMinStr}
+                          </span>
                         </div>
                       );
                     })
                   )}
                 </div>
 
-                {/* Footer lord info */}
-                <div className="text-[9px] text-[#856b54] text-right truncate">
+                {/* Footer sign lord */}
+                <div className="text-[8px] text-[#856b54] text-right truncate leading-none">
                   {rasiInfo.lord}
                 </div>
               </div>
@@ -175,19 +193,19 @@ export const RasiGridChart: React.FC<RasiGridChartProps> = ({
             }}
             className="border border-[#8b4513]/60 bg-gradient-to-b from-[#faf2e1] via-[#fffbf3] to-[#f7eed9] p-2 flex flex-col items-center justify-center text-center shadow-inner relative"
           >
-            <div className="w-10 h-10 rounded-full border border-[#d4af37] bg-[#fbf5e6] flex items-center justify-center text-[#8b4513] font-bold text-lg mb-1 shadow-xs">
+            <div className="w-9 h-9 rounded-full border border-[#d4af37] bg-[#fbf5e6] flex items-center justify-center text-[#8b4513] font-bold text-base mb-1 shadow-xs">
               உ
             </div>
             <div className="text-xs md:text-sm font-bold text-[#5c2311] tracking-wide font-cinzel">
-              {type === 'rasi' ? 'ராசி சக்கரம்' : 'நவாம்ச சக்கரம்'}
+              {type === 'rasi' ? 'ராசிக் கட்டம்' : 'நவாம்சக் கட்டம்'}
             </div>
             {personName && (
-              <div className="text-[11px] text-[#7a4e2d] font-medium truncate max-w-[120px]">
+              <div className="text-[11px] text-[#7a4e2d] font-semibold truncate max-w-[130px] mt-0.5">
                 {personName}
               </div>
             )}
-            <div className="text-[10px] text-[#8e6e52] mt-0.5">
-              லக்னம்: {TAMIL_RASIS[lagnaRasiIndex].tamil}
+            <div className="text-[10px] text-[#8e6e52] mt-0.5 font-medium">
+              லக்னம்: <strong className="text-[#5c2311]">{TAMIL_RASIS[lagnaRasiIndex].tamil}</strong>
             </div>
           </div>
         </div>
@@ -195,23 +213,21 @@ export const RasiGridChart: React.FC<RasiGridChartProps> = ({
     );
   };
 
-  const selectedInfo =
-    selectedRasi !== null ? TAMIL_RASIS[selectedRasi] : null;
-  const selectedPlanets =
-    selectedRasi !== null ? rasiChart[selectedRasi] || [] : [];
-  const selectedBhavam =
-    selectedRasi !== null ? getBhavamNumber(selectedRasi) : null;
+  const selectedInfo = selectedRasi !== null ? TAMIL_RASIS[selectedRasi] : null;
+  const selectedPlanets = selectedRasi !== null ? rasiChart[selectedRasi] || [] : [];
+  const selectedBhavam = selectedRasi !== null ? getBhavamNumber(selectedRasi) : null;
 
   return (
-    <div className="w-full flex flex-col gap-4">
+    <div className="w-full flex flex-col gap-6">
       {/* Chart Selector Segmented Control */}
-      <div className="flex items-center justify-between flex-wrap gap-2">
+      <div className="flex items-center justify-between flex-wrap gap-2 pb-1 border-b border-[#ebdcc4]">
         <div>
           <h2 className="text-lg md:text-xl font-bold text-[#4a1c0d] font-cinzel flex items-center gap-2">
-            <span>ஜாதக சக்கரங்கள் (கட்டம்)</span>
+            <span>ஜாதகச் சக்கரங்கள் & கிரக நிலைகள்</span>
           </h2>
           <p className="text-xs text-[#70533f]">
-            தென்னிந்திய பாரம்பரிய ராசி மற்றும் நவாம்ச அமைப்பு
+            துல்லியமான லஹரி அயனாம்சக் கணிப்பு (Prokerala & திருக்கணித முறைப்படி)
+            {ayanamshaStr && <span className="font-semibold text-[#8c5015] ml-1">· அயனாம்சம்: {ayanamshaStr}</span>}
           </p>
         </div>
 
@@ -251,19 +267,21 @@ export const RasiGridChart: React.FC<RasiGridChartProps> = ({
 
       {/* Grid Display Container */}
       <div
-        className={`grid gap-4 ${
-          chartMode === 'both' ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1 max-w-[460px] mx-auto'
+        className={`grid gap-5 ${
+          chartMode === 'both'
+            ? 'grid-cols-1 lg:grid-cols-2'
+            : 'grid-cols-1 max-w-[480px] mx-auto'
         }`}
       >
         {(chartMode === 'both' || chartMode === 'rasi') &&
-          renderSingleGrid('rasi', 'ராசிக் கட்டம்')}
+          renderSingleGrid('rasi', 'ராசிக் கட்டம் (D-1)')}
         {(chartMode === 'both' || chartMode === 'navamsa') &&
-          renderSingleGrid('navamsa', 'நவாம்சக் கட்டம்')}
+          renderSingleGrid('navamsa', 'நவாம்சக் கட்டம் (D-9)')}
       </div>
 
       {/* Selected House Interactive Details Drawer */}
       {selectedInfo && selectedBhavam && (
-        <div className="p-3.5 bg-[#fbf6ec] rounded-xl border border-[#decbb0] shadow-xs transition-all">
+        <div className="p-4 bg-[#fbf6ec] rounded-xl border border-[#decbb0] shadow-xs transition-all">
           <div className="flex items-start justify-between flex-wrap gap-2 mb-2 pb-2 border-b border-[#ebdcc4]">
             <div>
               <div className="text-xs text-[#8c674e] font-medium">தேர்ந்தெடுக்கப்பட்ட ராசி & பாவம்:</div>
@@ -282,17 +300,22 @@ export const RasiGridChart: React.FC<RasiGridChartProps> = ({
                 இந்த பாவத்தில் கிரகங்கள் எதுவும் இல்லை. இதன் அதிபதியான {selectedInfo.lord} அமைப்பின்படி பலன்கள் செயல்படும்.
               </p>
             ) : (
-              <div className="flex flex-col gap-1.5">
+              <div className="flex flex-col gap-2">
                 <span className="font-semibold text-[#4a1c0d]">அமர்ந்துள்ள கிரகங்கள்:</span>
                 <div className="flex flex-wrap gap-2">
                   {selectedPlanets.map((p, i) => (
                     <div
                       key={i}
-                      className="px-2.5 py-1 bg-white rounded border border-[#d9c7aa] shadow-2xs text-[11px] flex items-center gap-1.5"
+                      className="px-3 py-1.5 bg-white rounded-lg border border-[#d9c7aa] shadow-2xs text-xs flex items-center gap-2"
                     >
-                      <strong className="text-[#5c2311]">{p.tamilName}</strong>
-                      <span className="text-[#8c6d54]">({p.degreeInRasi}°)</span>
+                      <strong className="text-[#5c2311] font-bold">{p.tamilName}</strong>
+                      <span className="font-mono text-[#8c6d54]">({p.degMinStr})</span>
                       <span className="text-[#553b27]">· {p.nakshatraTamil} பாதம் {p.pada}</span>
+                      {p.isRetrograde && p.name !== 'Lagna' && (
+                        <span className="px-1.5 py-0.2 rounded bg-[#ffebee] text-[#c62828] text-[10px] font-bold">
+                          வக்ரம்
+                        </span>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -302,43 +325,144 @@ export const RasiGridChart: React.FC<RasiGridChartProps> = ({
         </div>
       )}
 
-      {/* Legend / Guidance note */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-[#70523d] pt-1">
-        <span className="font-semibold text-[#4a1c0d]">குறியீடுகள்:</span>
-        <span className="flex items-center gap-1">
-          <span className="w-4 h-4 rounded bg-[#b8860b] text-white text-[10px] flex items-center justify-center font-bold">
-            ல
-          </span>{' '}
-          லக்னம்
-        </span>
-        <span className="flex items-center gap-1">
-          <strong className="text-[#a71d2a]">சூ</strong> சூரியன்
-        </span>
-        <span className="flex items-center gap-1">
-          <strong className="text-[#1565c0]">ச</strong> சந்திரன்
-        </span>
-        <span className="flex items-center gap-1">
-          <strong className="text-[#c62828]">செ</strong> செவ்வாய்
-        </span>
-        <span className="flex items-center gap-1">
-          <strong className="text-[#2e7d32]">பு</strong> புதன்
-        </span>
-        <span className="flex items-center gap-1">
-          <strong className="text-[#ef6c00]">கு</strong> குரு
-        </span>
-        <span className="flex items-center gap-1">
-          <strong className="text-[#6a1b9a]">சு</strong> சுக்கிரன்
-        </span>
-        <span className="flex items-center gap-1">
-          <strong className="text-[#37474f]">சனீ</strong> சனி
-        </span>
-        <span className="flex items-center gap-1">
-          <strong className="text-[#455a64]">ரா</strong> ராகு
-        </span>
-        <span className="flex items-center gap-1">
-          <strong className="text-[#455a64]">கே</strong> கேது
-        </span>
-      </div>
+      {/* Prokerala-Standard Complete Planetary Positions Table */}
+      {allPlanets.length > 0 && (
+        <div className="bg-[#fffdf9] rounded-xl border border-[#d8c39e] overflow-hidden shadow-sm">
+          <div className="bg-[#f6eee0] px-4 py-3 border-b border-[#ebdcc4] flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <Table2 className="w-4 h-4 text-[#8c5015]" />
+              <h3 className="text-sm font-bold text-[#4a1c0d]">
+                நவக்கிரக ஸ்புட அட்டவணை (Planetary Positions Table)
+              </h3>
+            </div>
+            <button
+              onClick={() => setShowTable(!showTable)}
+              className="text-xs font-semibold text-[#78280f] hover:underline flex items-center gap-1"
+            >
+              {showTable ? 'சுருக்குக' : 'காண்பிக்க'}
+              {showTable ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            </button>
+          </div>
+
+          {showTable && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs text-left">
+                <thead className="bg-[#faf3e7] text-[#6b4c37] border-b border-[#ebdcc4] text-[11px]">
+                  <tr>
+                    <th className="py-2.5 px-3 font-bold">கிரகம் (Planet)</th>
+                    <th className="py-2.5 px-3 font-semibold">நிலை (Status)</th>
+                    <th className="py-2.5 px-3 font-semibold">ராசி (Sign)</th>
+                    <th className="py-2.5 px-3 font-bold font-mono">பாகை & கலை</th>
+                    <th className="py-2.5 px-3 font-semibold">நட்சத்திரம்</th>
+                    <th className="py-2.5 px-3 font-semibold">பாதம்</th>
+                    <th className="py-2.5 px-3 font-semibold">நட்சத்திர நாதன்</th>
+                    <th className="py-2.5 px-3 font-semibold">நவாம்சம்</th>
+                    <th className="py-2.5 px-3 font-semibold">ராசி நாதன்</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#ebdcc4]/60">
+                  {allPlanets.map((p, idx) => {
+                    const isLagna = p.name === 'Lagna';
+                    return (
+                      <tr key={idx} className="hover:bg-[#fbf7ee] transition-colors">
+                        <td className="py-2 px-3 font-bold text-[#4a1c0d] flex items-center gap-1.5">
+                          <span
+                            className={`w-5 h-5 rounded text-[10px] flex items-center justify-center font-bold ${
+                              isLagna
+                                ? 'bg-[#b8860b] text-white'
+                                : 'bg-[#f0e4cf] text-[#5c2311]'
+                            }`}
+                          >
+                            {p.shortTamil}
+                          </span>
+                          <span>{p.tamilName}</span>
+                        </td>
+                        <td className="py-2 px-3">
+                          {isLagna ? (
+                            <span className="text-[#8c674e] font-semibold">உதய லக்னம்</span>
+                          ) : p.isRetrograde ? (
+                            <span className="px-1.5 py-0.5 rounded bg-[#ffebee] text-[#c62828] font-bold text-[10px]">
+                              வக்ரம் (R)
+                            </span>
+                          ) : (
+                            <span className="text-[#2e7d32] font-semibold text-[11px]">
+                              நேர்கதி (D)
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-2 px-3 text-[#5c2311] font-semibold">{p.rasiTamil}</td>
+                        <td className="py-2 px-3 font-mono tabular-nums font-bold text-[#694833]">
+                          {p.degMinStr}
+                        </td>
+                        <td className="py-2 px-3 text-[#4a1c0d]">{p.nakshatraTamil}</td>
+                        <td className="py-2 px-3 font-semibold text-[#8c674e]">{p.pada}</td>
+                        <td className="py-2 px-3 text-[#523522]">{p.starLordTamil}</td>
+                        <td className="py-2 px-3 font-semibold text-[#78280f] bg-[#fcf5e8]/60">
+                          {p.navamsaRasiTamil}
+                        </td>
+                        <td className="py-2 px-3 text-[#523522]">{p.signLordTamil}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Vimshottari Dasa-Bhukti Timeline Table */}
+      {dasaTimeline.length > 0 && (
+        <div className="bg-[#fffdf9] rounded-xl border border-[#d8c39e] overflow-hidden shadow-sm">
+          <div className="bg-[#f6eee0] px-4 py-3 border-b border-[#ebdcc4] flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <Clock className="w-4 h-4 text-[#8c5015]" />
+              <h3 className="text-sm font-bold text-[#4a1c0d]">
+                விம்சோத்தரி தசா கால அட்டவணை (Vimshottari Dasa Timeline)
+              </h3>
+            </div>
+            <button
+              onClick={() => setShowDasaTable(!showDasaTable)}
+              className="text-xs font-semibold text-[#78280f] hover:underline flex items-center gap-1"
+            >
+              {showDasaTable ? 'சுருக்குக' : 'தசா காலங்களை விரிவாகக் காண்க'}
+              {showDasaTable ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            </button>
+          </div>
+
+          {showDasaTable && (
+            <div className="overflow-x-auto p-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                {dasaTimeline.map((d, idx) => (
+                  <div
+                    key={idx}
+                    className="p-3 bg-white rounded-lg border border-[#e2d0b0] hover:border-[#b8860b] transition-all flex flex-col justify-between"
+                  >
+                    <div className="flex items-center justify-between pb-1.5 border-b border-[#f0e4cf]">
+                      <span className="font-bold text-[#4a1c0d] text-sm">
+                        {d.lordTamil} தசை
+                      </span>
+                      <span className="text-[11px] font-semibold text-[#8c674e] bg-[#f6eee0] px-2 py-0.5 rounded">
+                        {d.durationYears} ஆண்டுகள்
+                      </span>
+                    </div>
+                    <div className="text-xs text-[#523522] mt-2 space-y-1">
+                      <div className="flex justify-between">
+                        <span className="text-[#8c674e]">வயது:</span>
+                        <strong className="font-mono">{d.startAge} - {d.endAge}</strong>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-[#8c674e]">காலம்:</span>
+                        <strong className="font-mono text-[#78280f]">{d.startDateStr} முதல் {d.endDateStr} வரை</strong>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };

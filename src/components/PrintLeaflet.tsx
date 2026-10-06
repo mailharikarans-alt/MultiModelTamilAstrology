@@ -57,13 +57,19 @@ export const PrintLeaflet: React.FC<PrintLeafletProps> = ({
                 <div className="flex justify-between text-[8px] leading-tight text-neutral-700">
                   <span>{rasiInfo.tamil}</span>
                 </div>
-                <div className="flex-1 flex flex-wrap gap-0.5 items-center justify-center content-center font-bold">
+                <div className="flex-1 flex flex-wrap gap-1 items-center justify-center content-center font-bold">
                   {planets.map((p, idx) => (
                     <span
                       key={idx}
-                      className={p.name === 'Lagna' ? 'underline font-extrabold' : ''}
+                      className={`text-center leading-tight ${p.name === 'Lagna' ? 'underline font-extrabold text-black' : ''}`}
                     >
-                      {p.shortTamil}
+                      <span className="block">
+                        {p.shortTamil}
+                        {p.isRetrograde && p.name !== 'Lagna' ? '(வ)' : ''}
+                      </span>
+                      <span className="font-mono text-[7px] font-normal block leading-none text-neutral-600">
+                        {p.degMinStr}
+                      </span>
                     </span>
                   ))}
                 </div>
@@ -146,9 +152,42 @@ export const PrintLeaflet: React.FC<PrintLeafletProps> = ({
         </div>
 
         {/* Charts Side-by-Side */}
-        <div className="flex justify-around items-center py-6 border-b border-black">
+        <div className="flex justify-around items-center py-5 border-b border-black">
           {renderSmallGrid(calculated.rasiChart, 'ராசிக் கட்டம்')}
           {renderSmallGrid(calculated.navamsaChart, 'நவாம்சக் கட்டம்')}
+        </div>
+
+        {/* Compact Planetary Positions Table for Print */}
+        <div className="py-4 border-b border-black">
+          <div className="font-bold text-xs mb-2">கிரக நிலைகள் (Planetary Positions):</div>
+          <table className="w-full text-[10px] text-left border border-black">
+            <thead className="bg-neutral-100 border-b border-black font-bold">
+              <tr>
+                <th className="p-1">கிரகம்</th>
+                <th className="p-1">நிலை</th>
+                <th className="p-1">ராசி</th>
+                <th className="p-1 font-mono">பாகை</th>
+                <th className="p-1">நட்சத்திரம்</th>
+                <th className="p-1">பாதம்</th>
+                <th className="p-1">நவாம்சம்</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-black/30">
+              {calculated.planets.map((p, idx) => (
+                <tr key={idx}>
+                  <td className="p-1 font-bold">{p.tamilName}</td>
+                  <td className="p-1">
+                    {p.name === 'Lagna' ? 'லக்னம்' : p.isRetrograde ? 'வக்ரம் (R)' : 'நேர்கதி'}
+                  </td>
+                  <td className="p-1">{p.rasiTamil}</td>
+                  <td className="p-1 font-mono font-bold">{p.degMinStr}</td>
+                  <td className="p-1">{p.nakshatraTamil}</td>
+                  <td className="p-1">{p.pada}</td>
+                  <td className="p-1">{p.navamsaRasiTamil}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
 
         {/* Astrological Synopsis */}

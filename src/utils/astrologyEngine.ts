@@ -1,22 +1,29 @@
 /**
  * Traditional South Indian / Tamil Vedic Astrology Engine
- * Accurate Nirayana (Sidereal) Astronomical calculations using Lahiri Ayanamsha
+ * Accurate Nirayana (Sidereal) Astronomical calculations using Lahiri Ayanamsha (Chitra Paksha)
+ * Powered by high-precision VSOP87 / NOVAS ephemeris via astronomy-engine
+ * Matching industry standards (Prokerala Tamil Jathagam & Thirukanitha Panchangam)
  */
+
+import * as Astronomy from 'astronomy-engine';
 
 export interface PlanetaryPosition {
   name: string;
   tamilName: string;
   shortTamil: string;
-  longitude: number;
+  longitude: number; // 0 to 360 sidereal longitude
   rasiIndex: number; // 0 = Mesham ... 11 = Meenam
   rasiName: string;
   rasiTamil: string;
   degreeInRasi: number;
+  degMinStr: string; // e.g. "29° 55'"
   nakshatraIndex: number; // 0 to 26
   nakshatraName: string;
   nakshatraTamil: string;
   pada: number; // 1, 2, 3, 4
-  navamsaRasiIndex: number;
+  starLordTamil: string;
+  signLordTamil: string;
+  navamsaRasiIndex: number; // 0 to 11
   navamsaRasiTamil: string;
   isRetrograde?: boolean;
 }
@@ -30,13 +37,28 @@ export interface DasaBalance {
   remainingDays: number;
 }
 
+export interface DasaPeriod {
+  lordTamil: string;
+  lordEnglish: string;
+  startAge: number;
+  endAge: number;
+  startDateStr: string;
+  endDateStr: string;
+  durationYears: number;
+  isCurrent?: boolean;
+}
+
 export interface PanchangamDetails {
   tithiTamil: string;
   tithiPaksha: string;
+  tithiNumber: number;
   yogamTamil: string;
   karanamTamil: string;
   dayTamil: string;
   ayanamsamValue: number;
+  ayanamsamStr: string; // e.g. 23° 47' 28" (லஹரி)
+  sunriseTimeStr?: string;
+  sunsetTimeStr?: string;
 }
 
 export interface ParasaraHouseInfo {
@@ -141,6 +163,7 @@ export interface CalculatedHoroscope {
     lordTamil: string;
   };
   dasaBalance: DasaBalance;
+  dasaTimeline: DasaPeriod[];
   panchangam: PanchangamDetails;
   parasara: ParasaraDetails;
   kp: KpDetails;
@@ -192,6 +215,18 @@ export const TAMIL_NAKSHATRAS = [
   { index: 26, tamil: 'ரேவதி', english: 'Revathi', lord: 'புதன்', dasaYears: 17 },
 ];
 
+export const VIMSHOTTARI_DASA_ORDER = [
+  { lordTamil: 'கேது', lordEnglish: 'Ketu', years: 7 },
+  { lordTamil: 'சுக்கிரன்', lordEnglish: 'Venus', years: 20 },
+  { lordTamil: 'சூரியன்', lordEnglish: 'Sun', years: 6 },
+  { lordTamil: 'சந்திரன்', lordEnglish: 'Moon', years: 10 },
+  { lordTamil: 'செவ்வாய்', lordEnglish: 'Mars', years: 7 },
+  { lordTamil: 'ராகு', lordEnglish: 'Rahu', years: 18 },
+  { lordTamil: 'குரு', lordEnglish: 'Jupiter', years: 16 },
+  { lordTamil: 'சனி', lordEnglish: 'Saturn', years: 19 },
+  { lordTamil: 'புதன்', lordEnglish: 'Mercury', years: 17 },
+];
+
 export const TAMIL_DAYS = [
   'ஞாயிறு', // Sunday
   'திங்கள்', // Monday
@@ -202,10 +237,19 @@ export const TAMIL_DAYS = [
   'சனி', // Saturday
 ];
 
-export const TAMIL_TITHIS = [
-  'பிரதமை', 'துவிதியை', 'திருதியை', 'சதுர்த்தி', 'பஞ்சமி',
-  'சஷ்டி', 'சப்தமி', 'அஷ்டமி', 'நவமி', 'தசமி',
-  'ஏகாதசி', 'துவாதசி', 'திரயோதசி', 'சதுர்த்தசி', 'பௌர்ணமி / அமாவாசை'
+export const TAMIL_YOGAMS = [
+  'விஷ்கம்பம்', 'ப்ரீதி', 'ஆயுஷ்மான்', 'சௌபாக்யம்', 'சோபனம்',
+  'அதிகண்டம்', 'சுகர்மம்', 'திருதி', 'சூலம்', 'கண்டம்',
+  'விருத்தி', 'துருவம்', 'வியாகாதம்', 'ஹர்ஷணம்', 'வஜ்ரம்',
+  'சித்தி', 'வியதீபாதம்', 'வரீயான்', 'பரிகம்', 'சிவம்',
+  'சித்தம்', 'சாத்தியம்', 'சுபம்', 'சுப்ரம்', 'பிராம்மம்',
+  'ஐந்திரம்', 'வைதிருதி',
+];
+
+export const TAMIL_KARANAMS = [
+  'பவம்', 'பாலவம்', 'கௌலவம்', 'சைதுளை',
+  'கரசை', 'வணிசை', 'பத்திரை', 'சகுனி',
+  'சதுஷ்பாதம்', 'நாகவம்', 'கிம்ஸ்துக்னம்',
 ];
 
 export const POPULAR_PLACES = [
@@ -236,36 +280,94 @@ export const POPULAR_PLACES = [
   { name: 'லண்டன் (London)', lat: 51.5074, lng: -0.1278, tz: 0.0 },
 ];
 
-/**
- * Calculates Julian Day Number from Date and UTC decimal hours
- */
-function getJulianDay(year: number, month: number, day: number, utcHours: number): number {
-  if (month <= 2) {
-    year -= 1;
-    month += 12;
-  }
-  const A = Math.floor(year / 100);
-  const B = 2 - A + Math.floor(A / 4);
-  const jd = Math.floor(365.25 * (year + 4716)) + Math.floor(30.6001 * (month + 1)) + day + B - 1524.5;
-  return jd + utcHours / 24.0;
-}
-
-/**
- * Lahiri Ayanamsha for a given Julian Day
- */
-function getLahiriAyanamsha(jd: number): number {
-  const T = (jd - 2451545.0) / 36525;
-  return 23.85 + 1.396 * T;
-}
-
 function normalizeDeg(deg: number): number {
   let d = deg % 360;
   if (d < 0) d += 360;
   return d;
 }
 
+function formatDegMin(deg: number): string {
+  const d = Math.floor(deg);
+  const m = Math.floor((deg - d) * 60);
+  return `${d.toString().padStart(2, '0')}° ${m.toString().padStart(2, '0')}'`;
+}
+
+function formatAyanamsha(deg: number): string {
+  const d = Math.floor(deg);
+  const mFloat = (deg - d) * 60;
+  const m = Math.floor(mFloat);
+  const s = Math.round((mFloat - m) * 60);
+  return `${d}° ${m}' ${s}" (லஹரி)`;
+}
+
 /**
- * Approximate Ephemeris for Vedic Astrology
+ * Standard Lahiri Ayanamsha (Chitra Paksha Ayanamsha)
+ * Formula based on IAU J2000 epoch used across Vedic astrology:
+ * T = days_since_J2000 / 36525.0
+ * Ayanamsha = 23° 51' 25.532" + 5029.0966" * T + 1.1120" * T^2
+ */
+function getLahiriAyanamsha(astroTime: Astronomy.AstroTime): number {
+  const T = astroTime.tt / 36525.0;
+  return 23.857092 + 1.396971 * T + 0.000309 * T * T;
+}
+
+/**
+ * Calculates high-precision Ascendant / Lagna (லக்னம்)
+ */
+function calculateAscendant(
+  astroTime: Astronomy.AstroTime,
+  lat: number,
+  lng: number,
+  ayanamsha: number
+): number {
+  const gmstHours = Astronomy.SiderealTime(astroTime);
+  const gmstDeg = (gmstHours * 15) % 360;
+  const lmstDeg = normalizeDeg(gmstDeg + lng);
+
+  const ramcRad = (lmstDeg * Math.PI) / 180;
+  const latRad = (lat * Math.PI) / 180;
+  const epsRad = (23.4392911 * Math.PI) / 180; // Obliquity of ecliptic
+
+  const yAsc = Math.cos(ramcRad);
+  const xAsc = -Math.sin(ramcRad) * Math.cos(epsRad) - Math.tan(latRad) * Math.sin(epsRad);
+
+  let ascTropDeg = (Math.atan2(yAsc, xAsc) * 180) / Math.PI;
+  ascTropDeg = normalizeDeg(ascTropDeg);
+
+  return normalizeDeg(ascTropDeg - ayanamsha);
+}
+
+/**
+ * Calculates KP Sub-Lord for any sidereal longitude
+ */
+function getKpSubLord(sidLong: number): { starLord: string; subLord: string } {
+  const nakIdx = Math.floor(sidLong / (360 / 27));
+  const nak = TAMIL_NAKSHATRAS[nakIdx];
+  const offsetMinutes = (sidLong % (360 / 27)) * 60; // 0 to 800 arcminutes
+
+  // Sub-lords in nakshatra start from the lord of the nakshatra
+  const startLordIdx = VIMSHOTTARI_DASA_ORDER.findIndex(
+    (d) => d.lordTamil === nak.lord
+  );
+
+  let accumulated = 0;
+  let subLordTamil = nak.lord;
+
+  for (let i = 0; i < 9; i++) {
+    const curLord = VIMSHOTTARI_DASA_ORDER[(startLordIdx + i) % 9];
+    const spanMinutes = (800 * curLord.years) / 120;
+    if (accumulated + spanMinutes >= offsetMinutes || i === 8) {
+      subLordTamil = curLord.lordTamil;
+      break;
+    }
+    accumulated += spanMinutes;
+  }
+
+  return { starLord: nak.lord, subLord: subLordTamil };
+}
+
+/**
+ * High-precision Vedic Astrological Engine
  */
 export function calculateAstrologyData(
   dob: string, // YYYY-MM-DD
@@ -282,125 +384,179 @@ export function calculateAstrologyData(
   const hours = parseInt(hrStr, 10);
   const minutes = parseInt(minStr, 10);
 
-  const localDecimalHours = hours + minutes / 60;
-  let utcHours = localDecimalHours - timezoneOffset;
-  let jd = getJulianDay(year, month, day, utcHours);
+  // UTC Date conversion
+  const utcHours = hours + minutes / 60 - timezoneOffset;
+  const birthDateUtc = new Date(Date.UTC(year, month - 1, day, 0, 0, 0) + utcHours * 3600000);
+  const astroTime = new Astronomy.AstroTime(birthDateUtc);
+  const astroTimeNextHour = new Astronomy.AstroTime(new Date(birthDateUtc.getTime() + 3600000));
 
-  const T = (jd - 2451545.0) / 36525.0;
-  const ayanamsha = getLahiriAyanamsha(jd);
+  const T = astroTime.tt / 36525.0;
+  const ayanamsha = getLahiriAyanamsha(astroTime);
 
-  // 1. Sun Tropical Longitude
-  const L0 = 280.46646 + 36000.76983 * T;
-  const M_sun = 357.52911 + 35999.05029 * T;
-  const C_sun = (1.914602 - 0.004817 * T) * Math.sin((M_sun * Math.PI) / 180) +
-                (0.019993 - 0.000101 * T) * Math.sin((2 * M_sun * Math.PI) / 180);
-  const sunTropLong = normalizeDeg(L0 + C_sun);
-  const sunSidLong = normalizeDeg(sunTropLong - ayanamsha);
+  // 1. Calculate Lagna (லக்னம்)
+  const lagnaSidLong = calculateAscendant(astroTime, placeLat, placeLng, ayanamsha);
 
-  // 2. Moon Tropical Longitude (approximate Brown's formula)
-  const Lp = 218.3164477 + 481267.88123421 * T;
-  const D = 297.8501921 + 445267.1114034 * T;
-  const M_moon = 134.9633964 + 477198.8675055 * T;
-  const moonPerturbation =
-    6.289 * Math.sin((M_moon * Math.PI) / 180) +
-    1.274 * Math.sin(((2 * D - M_moon) * Math.PI) / 180) +
-    0.658 * Math.sin((2 * D * Math.PI) / 180) -
-    0.186 * Math.sin((M_sun * Math.PI) / 180) -
-    0.114 * Math.sin((2 * 93.272095 * Math.PI) / 180);
-  const moonTropLong = normalizeDeg(Lp + moonPerturbation);
-  const moonSidLong = normalizeDeg(moonTropLong - ayanamsha);
+  // 2. Calculate Planets using astronomy-engine
+  const PLANET_DEFINITIONS: {
+    name: string;
+    tamilName: string;
+    shortTamil: string;
+    body: Astronomy.Body | null;
+  }[] = [
+    { name: 'Sun', tamilName: 'சூரியன்', shortTamil: 'சூரி', body: Astronomy.Body.Sun },
+    { name: 'Moon', tamilName: 'சந்திரன்', shortTamil: 'சந்', body: Astronomy.Body.Moon },
+    { name: 'Mars', tamilName: 'செவ்வாய்', shortTamil: 'செவ்', body: Astronomy.Body.Mars },
+    { name: 'Mercury', tamilName: 'புதன்', shortTamil: 'புத', body: Astronomy.Body.Mercury },
+    { name: 'Jupiter', tamilName: 'குரு', shortTamil: 'குரு', body: Astronomy.Body.Jupiter },
+    { name: 'Venus', tamilName: 'சுக்கிரன்', shortTamil: 'சுக்', body: Astronomy.Body.Venus },
+    { name: 'Saturn', tamilName: 'சனி', shortTamil: 'சனி', body: Astronomy.Body.Saturn },
+  ];
 
-  // 3. Rahu & Ketu (Mean Nodes)
-  const omega = normalizeDeg(125.04452 - 1934.136261 * T);
-  const rahuSidLong = normalizeDeg(omega - ayanamsha);
+  const calculatedPlanets: PlanetaryPosition[] = [];
+
+  for (const p of PLANET_DEFINITIONS) {
+    if (p.body) {
+      const v1 = Astronomy.GeoVector(p.body, astroTime, true);
+      const e1 = Astronomy.Ecliptic(v1).elon;
+
+      // Retrograde detection
+      const v2 = Astronomy.GeoVector(p.body, astroTimeNextHour, true);
+      const e2 = Astronomy.Ecliptic(v2).elon;
+      let diff = e2 - e1;
+      if (diff > 180) diff -= 360;
+      if (diff < -180) diff += 360;
+      const isRetrograde = p.name !== 'Sun' && p.name !== 'Moon' && diff < 0;
+
+      const sidLong = normalizeDeg(e1 - ayanamsha);
+      const rasiIndex = Math.floor(sidLong / 30);
+      const degreeInRasi = Number((sidLong % 30).toFixed(2));
+      const degMinStr = formatDegMin(degreeInRasi);
+
+      const nakIdx = Math.floor(sidLong / (360 / 27));
+      const nak = TAMIL_NAKSHATRAS[nakIdx];
+      const pada = Math.floor((sidLong % (360 / 27)) / (360 / 108)) + 1;
+
+      // Standard Vedic Navamsha: 108 divisions of 3° 20' across the 360 zodiac
+      const navamsaRasiIndex = Math.floor(sidLong / (360 / 108)) % 12;
+
+      calculatedPlanets.push({
+        name: p.name,
+        tamilName: p.tamilName,
+        shortTamil: p.shortTamil,
+        longitude: sidLong,
+        rasiIndex,
+        rasiName: TAMIL_RASIS[rasiIndex].english,
+        rasiTamil: TAMIL_RASIS[rasiIndex].tamil,
+        degreeInRasi,
+        degMinStr,
+        nakshatraIndex: nakIdx,
+        nakshatraName: nak.english,
+        nakshatraTamil: nak.tamil,
+        pada,
+        starLordTamil: nak.lord,
+        signLordTamil: TAMIL_RASIS[rasiIndex].lord,
+        navamsaRasiIndex,
+        navamsaRasiTamil: TAMIL_RASIS[navamsaRasiIndex].tamil,
+        isRetrograde,
+      });
+    }
+  }
+
+  // 3. Rahu & Ketu (Mean Lunar Node, matching Indian ephemeris)
+  const omega = 125.04455501 - 1934.1361849 * T + 0.0020762 * T * T;
+  const rahuTropLong = normalizeDeg(omega);
+  const rahuSidLong = normalizeDeg(rahuTropLong - ayanamsha);
   const ketuSidLong = normalizeDeg(rahuSidLong + 180);
 
-  // 4. Mars (செவ்வாய்)
-  const M_mars = 19.37 + 19140.3 * T;
-  const marsTropLong = normalizeDeg(355.43 + 19140.3 * T + 10.69 * Math.sin((M_mars * Math.PI) / 180));
-  const marsSidLong = normalizeDeg(marsTropLong - ayanamsha);
+  const rahuRasiIdx = Math.floor(rahuSidLong / 30);
+  const rahuDegInRasi = Number((rahuSidLong % 30).toFixed(2));
+  const rahuNakIdx = Math.floor(rahuSidLong / (360 / 27));
+  const rahuNak = TAMIL_NAKSHATRAS[rahuNakIdx];
+  const rahuPada = Math.floor((rahuSidLong % (360 / 27)) / (360 / 108)) + 1;
+  const rahuNavamsaIdx = Math.floor(rahuSidLong / (360 / 108)) % 12;
 
-  // 5. Mercury (புதன்)
-  const mercMean = normalizeDeg(sunTropLong + 15 * Math.sin(((L0 * 4) * Math.PI) / 180));
-  const mercSidLong = normalizeDeg(mercMean - ayanamsha);
+  calculatedPlanets.push({
+    name: 'Rahu',
+    tamilName: 'ராகு',
+    shortTamil: 'ராகு',
+    longitude: rahuSidLong,
+    rasiIndex: rahuRasiIdx,
+    rasiName: TAMIL_RASIS[rahuRasiIdx].english,
+    rasiTamil: TAMIL_RASIS[rahuRasiIdx].tamil,
+    degreeInRasi: rahuDegInRasi,
+    degMinStr: formatDegMin(rahuDegInRasi),
+    nakshatraIndex: rahuNakIdx,
+    nakshatraName: rahuNak.english,
+    nakshatraTamil: rahuNak.tamil,
+    pada: rahuPada,
+    starLordTamil: rahuNak.lord,
+    signLordTamil: TAMIL_RASIS[rahuRasiIdx].lord,
+    navamsaRasiIndex: rahuNavamsaIdx,
+    navamsaRasiTamil: TAMIL_RASIS[rahuNavamsaIdx].tamil,
+    isRetrograde: true, // Nodes are always retrograde in mean motion
+  });
 
-  // 6. Jupiter (குரு)
-  const M_jup = 20.0 + 3034.9 * T;
-  const jupTropLong = normalizeDeg(34.35 + 3034.9 * T + 5.5 * Math.sin((M_jup * Math.PI) / 180));
-  const jupSidLong = normalizeDeg(jupTropLong - ayanamsha);
+  const ketuRasiIdx = Math.floor(ketuSidLong / 30);
+  const ketuDegInRasi = Number((ketuSidLong % 30).toFixed(2));
+  const ketuNakIdx = Math.floor(ketuSidLong / (360 / 27));
+  const ketuNak = TAMIL_NAKSHATRAS[ketuNakIdx];
+  const ketuPada = Math.floor((ketuSidLong % (360 / 27)) / (360 / 108)) + 1;
+  const ketuNavamsaIdx = Math.floor(ketuSidLong / (360 / 108)) % 12;
 
-  // 7. Venus (சுக்கிரன்)
-  const venMean = normalizeDeg(sunTropLong + 25 * Math.sin(((L0 * 1.6) * Math.PI) / 180));
-  const venSidLong = normalizeDeg(venMean - ayanamsha);
+  calculatedPlanets.push({
+    name: 'Ketu',
+    tamilName: 'கேது',
+    shortTamil: 'கேது',
+    longitude: ketuSidLong,
+    rasiIndex: ketuRasiIdx,
+    rasiName: TAMIL_RASIS[ketuRasiIdx].english,
+    rasiTamil: TAMIL_RASIS[ketuRasiIdx].tamil,
+    degreeInRasi: ketuDegInRasi,
+    degMinStr: formatDegMin(ketuDegInRasi),
+    nakshatraIndex: ketuNakIdx,
+    nakshatraName: ketuNak.english,
+    nakshatraTamil: ketuNak.tamil,
+    pada: ketuPada,
+    starLordTamil: ketuNak.lord,
+    signLordTamil: TAMIL_RASIS[ketuRasiIdx].lord,
+    navamsaRasiIndex: ketuNavamsaIdx,
+    navamsaRasiTamil: TAMIL_RASIS[ketuNavamsaIdx].tamil,
+    isRetrograde: true,
+  });
 
-  // 8. Saturn (சனி)
-  const M_sat = 317.0 + 1222.1 * T;
-  const satTropLong = normalizeDeg(50.07 + 1222.1 * T + 6.3 * Math.sin((M_sat * Math.PI) / 180));
-  const satSidLong = normalizeDeg(satTropLong - ayanamsha);
+  // Lagna Position Object
+  const lagnaRasiIdx = Math.floor(lagnaSidLong / 30);
+  const lagnaDegInRasi = Number((lagnaSidLong % 30).toFixed(2));
+  const lagnaNakIdx = Math.floor(lagnaSidLong / (360 / 27));
+  const lagnaNak = TAMIL_NAKSHATRAS[lagnaNakIdx];
+  const lagnaPada = Math.floor((lagnaSidLong % (360 / 27)) / (360 / 108)) + 1;
+  const lagnaNavamsaIdx = Math.floor(lagnaSidLong / (360 / 108)) % 12;
 
-  // 9. Ascendant / Lagnam (லக்னம்)
-  // Sidereal Time at Greenwich
-  const GMST0 = 280.46061837 + 360.98564736629 * (jd - 2451545.0);
-  const LMST = normalizeDeg(GMST0 + placeLng);
-  const eps = 23.4392911 - 0.0130042 * T;
-  const epsRad = (eps * Math.PI) / 180;
-  const lmstRad = (LMST * Math.PI) / 180;
-  const latRad = (placeLat * Math.PI) / 180;
-
-  const yAsc = -Math.cos(lmstRad);
-  const xAsc = Math.sin(lmstRad) * Math.cos(epsRad) + Math.tan(latRad) * Math.sin(epsRad);
-  let ascTropLong = (Math.atan2(yAsc, xAsc) * 180) / Math.PI;
-  ascTropLong = normalizeDeg(ascTropLong + 90);
-  const ascSidLong = normalizeDeg(ascTropLong - ayanamsha);
-
-  const createPlanetaryObj = (
-    name: string,
-    tamilName: string,
-    shortTamil: string,
-    sidLong: number
-  ): PlanetaryPosition => {
-    const rasiIdx = Math.floor(sidLong / 30);
-    const degInRasi = sidLong % 30;
-    const nakIdx = Math.floor(sidLong / (360 / 27));
-    const nakRemainder = sidLong % (360 / 27);
-    const pada = Math.floor(nakRemainder / (360 / 108)) + 1;
-
-    // Navamsa sign calculation: 9 padas per sign (total 108 padas in 12 signs)
-    const totalPada = Math.floor(sidLong / (360 / 108));
-    const navamsaRasiIdx = totalPada % 12;
-
-    return {
-      name,
-      tamilName,
-      shortTamil,
-      longitude: Number(sidLong.toFixed(2)),
-      rasiIndex: rasiIdx,
-      rasiName: TAMIL_RASIS[rasiIdx].english,
-      rasiTamil: TAMIL_RASIS[rasiIdx].tamil,
-      degreeInRasi: Number(degInRasi.toFixed(2)),
-      nakshatraIndex: nakIdx,
-      nakshatraName: TAMIL_NAKSHATRAS[nakIdx].english,
-      nakshatraTamil: TAMIL_NAKSHATRAS[nakIdx].tamil,
-      pada,
-      navamsaRasiIndex: navamsaRasiIdx,
-      navamsaRasiTamil: TAMIL_RASIS[navamsaRasiIdx].tamil,
-    };
+  const lagnaPosition: PlanetaryPosition = {
+    name: 'Lagna',
+    tamilName: 'லக்னம்',
+    shortTamil: 'ல',
+    longitude: lagnaSidLong,
+    rasiIndex: lagnaRasiIdx,
+    rasiName: TAMIL_RASIS[lagnaRasiIdx].english,
+    rasiTamil: TAMIL_RASIS[lagnaRasiIdx].tamil,
+    degreeInRasi: lagnaDegInRasi,
+    degMinStr: formatDegMin(lagnaDegInRasi),
+    nakshatraIndex: lagnaNakIdx,
+    nakshatraName: lagnaNak.english,
+    nakshatraTamil: lagnaNak.tamil,
+    pada: lagnaPada,
+    starLordTamil: lagnaNak.lord,
+    signLordTamil: TAMIL_RASIS[lagnaRasiIdx].lord,
+    navamsaRasiIndex: lagnaNavamsaIdx,
+    navamsaRasiTamil: TAMIL_RASIS[lagnaNavamsaIdx].tamil,
+    isRetrograde: false,
   };
 
-  const lagna = createPlanetaryObj('Lagna', 'லக்னம்', 'ல', ascSidLong);
-  const sun = createPlanetaryObj('Sun', 'சூரியன்', 'சூ', sunSidLong);
-  const moon = createPlanetaryObj('Moon', 'சந்திரன்', 'ச', moonSidLong);
-  const mars = createPlanetaryObj('Mars', 'செவ்வாய்', 'செ', marsSidLong);
-  const mercury = createPlanetaryObj('Mercury', 'புதன்', 'பு', mercSidLong);
-  const jupiter = createPlanetaryObj('Jupiter', 'குரு', 'கு', jupSidLong);
-  const venus = createPlanetaryObj('Venus', 'சுக்கிரன்', 'சு', venSidLong);
-  const saturn = createPlanetaryObj('Saturn', 'சனி', 'சனீ', satSidLong);
-  const rahu = createPlanetaryObj('Rahu', 'ராகு', 'ரா', rahuSidLong);
-  const ketu = createPlanetaryObj('Ketu', 'கேது', 'கே', ketuSidLong);
+  const sunPos = calculatedPlanets.find((p) => p.name === 'Sun')!;
+  const moonPos = calculatedPlanets.find((p) => p.name === 'Moon')!;
 
-  const allPlanets = [lagna, sun, moon, mars, mercury, jupiter, venus, saturn, rahu, ketu];
-
-  // Organize into 12 Rasis for Rasi Chart and Navamsa Chart
+  // 4. Build Rasi Chart & Navamsa Chart grids
   const rasiChart: { [rasiIndex: number]: PlanetaryPosition[] } = {};
   const navamsaChart: { [rasiIndex: number]: PlanetaryPosition[] } = {};
 
@@ -409,101 +565,141 @@ export function calculateAstrologyData(
     navamsaChart[i] = [];
   }
 
-  allPlanets.forEach((p) => {
-    rasiChart[p.rasiIndex].push(p);
-    navamsaChart[p.navamsaRasiIndex].push(p);
-  });
+  // Include Lagna in charts
+  rasiChart[lagnaRasiIdx].push(lagnaPosition);
+  navamsaChart[lagnaNavamsaIdx].push(lagnaPosition);
 
-  // Calculate Dasa Balance (விம்சோத்தரி தசா இருப்பு)
-  const nakTotalDeg = 360 / 27; // 13.3333 deg
-  const moonNakProgression = (moonSidLong % nakTotalDeg) / nakTotalDeg;
-  const currentNakInfo = TAMIL_NAKSHATRAS[moon.nakshatraIndex];
-  const totalDasaYrs = currentNakInfo.dasaYears;
-  const remFraction = 1 - moonNakProgression;
-  const totalRemYrs = totalDasaYrs * remFraction;
-  const remYears = Math.floor(totalRemYrs);
-  const remMonthsFloat = (totalRemYrs - remYears) * 12;
-  const remMonths = Math.floor(remMonthsFloat);
-  const remDays = Math.floor((remMonthsFloat - remMonths) * 30);
+  // Include Planets in charts
+  for (const planet of calculatedPlanets) {
+    rasiChart[planet.rasiIndex].push(planet);
+    navamsaChart[planet.navamsaRasiIndex].push(planet);
+  }
 
-  const dasaBalance: DasaBalance = {
-    lordTamil: currentNakInfo.lord,
-    lordEnglish: currentNakInfo.lord,
-    totalYears: totalDasaYrs,
-    remainingYears: remYears,
-    remainingMonths: remMonths,
-    remainingDays: remDays,
-  };
-
-  // Panchangam Details
-  // Tithi: Angular distance between Moon and Sun (12 deg per tithi)
-  const diffLong = normalizeDeg(moonSidLong - sunSidLong);
-  const tithiIndex = Math.floor(diffLong / 12);
-  const isSukla = tithiIndex < 15;
-  const tithiNameIndex = tithiIndex % 15;
-  const tithiPaksha = isSukla ? 'சுக்ல பட்சம் (வளர்பிறை)' : 'கிருஷ்ண பட்சம் (தேய்பிறை)';
-  const tithiTamil = `${tithiPaksha} - ${TAMIL_TITHIS[tithiNameIndex]}`;
-
-  // Yogam (27 Nithya Yogas)
-  const yogaSum = normalizeDeg(moonSidLong + sunSidLong);
-  const yogaIndex = Math.floor(yogaSum / (360 / 27));
-  const YOGA_NAMES = [
-    'விஷ்கம்பம்', 'ப்ரீதி', 'ஆயுஷ்மான்', 'சவுபாக்யம்', 'சோபனம்',
-    'அதிகண்டம்', 'சுகர்மம்', 'திருதி', 'சூலம்', 'கண்டம்',
-    'விருத்தி', 'துருவம்', 'வியாகாதம்', 'ஹர்ஷணம்', 'வஜ்ரம்',
-    'சித்தி', 'வியதிபாதம்', 'வரியான்', 'பரிகம்', 'சிவம்',
-    'சித்தம்', 'சாத்தியம்', 'சுப்பிரம்', 'சுப்பிரம்', 'ஐந்திரம்', 'வைத்ருதி', 'பிரம்மம்'
+  // 5. Panchangam Calculations (matching standard Thirukanitha Panchangam)
+  const tithiDiff = normalizeDeg(moonPos.longitude - sunPos.longitude);
+  const tithiNumber = Math.floor(tithiDiff / 12) + 1;
+  const tithiPaksha = tithiNumber <= 15 ? 'வளர்பிறை (சுக்கில பட்சம்)' : 'தேய்பிறை (கிருஷ்ண பட்சம்)';
+  const tithiIdx = (tithiNumber - 1) % 15;
+  const tithiNames = [
+    'பிரதமை', 'துவிதியை', 'திருதியை', 'சதுர்த்தி', 'பஞ்சமி',
+    'சஷ்டி', 'சப்தமி', 'அஷ்டமி', 'நவமி', 'தசமி',
+    'ஏகாதசி', 'துவாதசி', 'திரயோதசி', 'சதுர்த்தசி',
+    tithiNumber === 15 ? 'பௌர்ணமி' : 'அமாவாசை',
   ];
-  const yogamTamil = YOGA_NAMES[yogaIndex % YOGA_NAMES.length];
+  const tithiTamil = `${tithiNames[tithiIdx]} (${tithiPaksha})`;
 
-  // Karanam (60 half-tithis)
-  const karanaIndex = Math.floor(diffLong / 6);
-  const KARANA_NAMES = ['பவம்', 'பாலவம்', 'கௌலவம்', 'சைதுளை', 'கரசை', 'வனசை', 'பத்திரை', 'சகுனி', 'சதுஷ்பாதம்', 'நாகவம்', 'கிம்ஸ்துக்னம்'];
-  const karanamTamil = KARANA_NAMES[karanaIndex % KARANA_NAMES.length];
+  const yogamSum = normalizeDeg(moonPos.longitude + sunPos.longitude);
+  const yogamIdx = Math.floor(yogamSum / (360 / 27));
+  const yogamTamil = TAMIL_YOGAMS[yogamIdx];
+
+  const karanamIdx = Math.floor(tithiDiff / 6) % 11;
+  const karanamTamil = TAMIL_KARANAMS[karanamIdx];
 
   // Day of week
-  const dateObj = new Date(year, month - 1, day);
-  const dayTamil = TAMIL_DAYS[dateObj.getDay()];
+  const dayOfWeekIdx = birthDateUtc.getUTCDay();
+  const dayTamil = TAMIL_DAYS[dayOfWeekIdx];
 
-  // --- BRIHAT PARASARA HORA SASTRA (BPHS) COMPUTATIONS ---
-  const getHouseInfo = (hNum: number): ParasaraHouseInfo => {
-    const rasiIdx = (lagna.rasiIndex + (hNum - 1)) % 12;
+  // 6. Vimshottari Dasa Balance & Lifecycle Timeline
+  const moonNakIdx = moonPos.nakshatraIndex;
+  const moonNak = TAMIL_NAKSHATRAS[moonNakIdx];
+  const nakshatraSpan = 360 / 27; // 13.333333°
+  const elapsedDeg = moonPos.longitude % nakshatraSpan;
+  const elapsedFraction = elapsedDeg / nakshatraSpan;
+  const remainingFraction = Math.max(0, Math.min(1, 1 - elapsedFraction));
+
+  const totalDasaYears = moonNak.dasaYears;
+  const remYearsTotal = remainingFraction * totalDasaYears;
+  const remainingYears = Math.floor(remYearsTotal);
+  const remainingMonths = Math.floor((remYearsTotal - remainingYears) * 12);
+  const remainingDays = Math.floor(
+    (((remYearsTotal - remainingYears) * 12) - remainingMonths) * 30.4375
+  );
+
+  const dasaBalance: DasaBalance = {
+    lordTamil: moonNak.lord,
+    lordEnglish: VIMSHOTTARI_DASA_ORDER.find((v) => v.lordTamil === moonNak.lord)?.lordEnglish || '',
+    totalYears: totalDasaYears,
+    remainingYears,
+    remainingMonths,
+    remainingDays,
+  };
+
+  // Build sequential Dasa timeline across 120-year cycle
+  const dasaTimeline: DasaPeriod[] = [];
+  const startLordIdx = VIMSHOTTARI_DASA_ORDER.findIndex(
+    (d) => d.lordTamil === moonNak.lord
+  );
+
+  let currentStartAge = 0;
+  let currentStartYear = year + (month - 1) / 12 + day / 365.25;
+
+  for (let i = 0; i < 9; i++) {
+    const curLord = VIMSHOTTARI_DASA_ORDER[(startLordIdx + i) % 9];
+    const duration = i === 0 ? remYearsTotal : curLord.years;
+    const endAge = currentStartAge + duration;
+    const endYear = currentStartYear + duration;
+
+    dasaTimeline.push({
+      lordTamil: curLord.lordTamil,
+      lordEnglish: curLord.lordEnglish,
+      startAge: Number(currentStartAge.toFixed(1)),
+      endAge: Number(endAge.toFixed(1)),
+      startDateStr: Math.floor(currentStartYear).toString(),
+      endDateStr: Math.floor(endYear).toString(),
+      durationYears: Number(duration.toFixed(1)),
+    });
+
+    currentStartAge = endAge;
+    currentStartYear = endYear;
+  }
+
+  // 7. Parasara House Classifications & Yogas
+  const getHouseRasiIdx = (houseNum: number) => (lagnaRasiIdx + houseNum - 1) % 12;
+
+  const buildHouseInfo = (h: number): ParasaraHouseInfo => {
+    const rIdx = getHouseRasiIdx(h);
+    const rInfo = TAMIL_RASIS[rIdx];
+    const planetsInHouse = rasiChart[rIdx]
+      .filter((p) => p.name !== 'Lagna')
+      .map((p) => p.tamilName);
     return {
-      house: hNum,
-      rasiIndex: rasiIdx,
-      rasiTamil: TAMIL_RASIS[rasiIdx].tamil,
-      lordTamil: TAMIL_RASIS[rasiIdx].lord,
-      planets: (rasiChart[rasiIdx] || []).map((p) => p.tamilName),
+      house: h,
+      rasiIndex: rIdx,
+      rasiTamil: rInfo.tamil,
+      lordTamil: rInfo.lord,
+      planets: planetsInHouse,
     };
   };
 
-  const kendras = [1, 4, 7, 10].map(getHouseInfo);
-  const trikonas = [1, 5, 9].map(getHouseInfo);
-  const upachayas = [3, 6, 10, 11].map(getHouseInfo);
-  const dusthanas = [6, 8, 12].map(getHouseInfo);
-  const marakas = [2, 7].map(getHouseInfo);
+  const kendras = [1, 4, 7, 10].map(buildHouseInfo);
+  const trikonas = [1, 5, 9].map(buildHouseInfo);
+  const upachayas = [3, 6, 10, 11].map(buildHouseInfo);
+  const dusthanas = [6, 8, 12].map(buildHouseInfo);
+  const marakas = [2, 7].map(buildHouseInfo);
 
-  // Badhaka House per Parasara
-  const lagnaRasiIdx = lagna.rasiIndex;
-  const isSara = [0, 3, 6, 9].includes(lagnaRasiIdx);
-  const isSthira = [1, 4, 7, 10].includes(lagnaRasiIdx);
-  let badhakaHouse = 11;
-  let badhakaType = 'சர லக்னம் (11-ஆம் பாவம் பாதக ஸ்தானம்)';
-  if (isSthira) {
-    badhakaHouse = 9;
-    badhakaType = 'ஸ்திர லக்னம் (9-ஆம் பாவம் பாதக ஸ்தானம்)';
-  } else if (!isSara && !isSthira) {
-    badhakaHouse = 7;
-    badhakaType = 'உபய லக்னம் (7-ஆம் பாவம் பாதக ஸ்தானம்)';
+  // Badhaka house: Movable -> 11, Fixed -> 9, Dual -> 7
+  let badhakaHouseNum = 11;
+  let badhakaType = 'சர ராசி (Movable) - 11-ஆம் பாவம் பாதக ஸ்தானம்';
+  if ([1, 4, 7, 10].includes(lagnaRasiIdx)) {
+    // Sthira (Fixed)
+    badhakaHouseNum = 9;
+    badhakaType = 'ஸ்திர ராசி (Fixed) - 9-ஆம் பாவம் பாதக ஸ்தானம்';
+  } else if ([2, 5, 8, 11].includes(lagnaRasiIdx)) {
+    // Dvisvabhava (Dual)
+    badhakaHouseNum = 7;
+    badhakaType = 'உபய ராசி (Dual) - 7-ஆம் பாவம் பாதக ஸ்தானம்';
   }
-  const badhakaInfo = getHouseInfo(badhakaHouse);
+  const badhakaRasiIdx = getHouseRasiIdx(badhakaHouseNum);
 
-  // Vargottama per Parasara
-  const vargottamaPlanets = allPlanets
-    .filter((p) => p.rasiIndex === p.navamsaRasiIndex)
-    .map((p) => ({ planetTamil: p.tamilName, rasiTamil: p.rasiTamil }));
+  // Vargottama planets (occupying identical sign in Rasi and Navamsa)
+  const vargottamaPlanets: { planetTamil: string; rasiTamil: string }[] = [];
+  for (const p of calculatedPlanets) {
+    if (p.rasiIndex === p.navamsaRasiIndex) {
+      vargottamaPlanets.push({ planetTamil: p.tamilName, rasiTamil: p.rasiTamil });
+    }
+  }
 
-  // Pancha Mahapurusha Yogas (BPHS Chapter on Special Yogas)
+  // Pancha Mahapurusha Yogas (Mars, Mercury, Jupiter, Venus, Saturn in Kendra and own/exaltation)
   const panchaMahapurushaYogas: {
     yogaName: string;
     planetTamil: string;
@@ -511,87 +707,96 @@ export function calculateAstrologyData(
     description: string;
   }[] = [];
 
-  const kendraRasiIndices = kendras.map((k) => k.rasiIndex);
+  const kendraRasis = [1, 4, 7, 10].map(getHouseRasiIdx);
 
-  // 1. Ruchaka Yoga (Mars in Kendra in Mesham 0, Viruchigam 7, Makaram 9)
-  if (kendraRasiIndices.includes(mars.rasiIndex) && [0, 7, 9].includes(mars.rasiIndex)) {
+  // Mars -> Ruchaka Yoga (Mesham, Viruchigam, Makaram)
+  const mars = calculatedPlanets.find((p) => p.name === 'Mars');
+  if (mars && kendraRasis.includes(mars.rasiIndex) && [0, 7, 9].includes(mars.rasiIndex)) {
     panchaMahapurushaYogas.push({
-      yogaName: 'ருசக யோகம் (Ruchaka Yoga)',
+      yogaName: 'ருசக யோகம் (Ruchaka Yoga - செவ்வாய் மகாபுருஷ யோகம்)',
       planetTamil: 'செவ்வாய்',
       rasiTamil: mars.rasiTamil,
-      description: 'பராசரர் முறைப்படி செவ்வாய் கேந்திரத்தில் ஆட்சி அல்லது உச்சம் பெற்று உருவான வீரமும், தலைமைப் பண்பும், நில புலன்களும் தரும் பஞ்ச மகாபுருஷ யோகம்.',
+      description: 'செவ்வாய் கேந்திரத்தில் ஆட்சி/உச்சம் பெற்று அமைந்ததால் சிறந்த தலைமைப் பண்பு, தைரியம், நிர்வாக அதிகாரம் மற்றும் நிலபுலன்கள் அமையும்.',
     });
   }
 
-  // 2. Bhadra Yoga (Mercury in Kendra in Mithunam 2, Kanni 5)
-  if (kendraRasiIndices.includes(mercury.rasiIndex) && [2, 5].includes(mercury.rasiIndex)) {
+  // Jupiter -> Hamsa Yoga (Dhanusu, Meenam, Katakam)
+  const jupiter = calculatedPlanets.find((p) => p.name === 'Jupiter');
+  if (jupiter && kendraRasis.includes(jupiter.rasiIndex) && [8, 11, 3].includes(jupiter.rasiIndex)) {
     panchaMahapurushaYogas.push({
-      yogaName: 'பத்ர யோகம் (Bhadra Yoga)',
-      planetTamil: 'புதன்',
-      rasiTamil: mercury.rasiTamil,
-      description: 'பராசரர் முறைப்படி புதன் கேந்திரத்தில் ஆட்சி அல்லது உச்சம் பெற்று உருவான கூர்மையான புத்தி, கணித ஞானம், வாக் வன்மை தரும் பஞ்ச மகாபுருஷ யோகம்.',
-    });
-  }
-
-  // 3. Hamsa Yoga (Jupiter in Kendra in Katakam 3, Dhanusu 8, Meenam 11)
-  if (kendraRasiIndices.includes(jupiter.rasiIndex) && [3, 8, 11].includes(jupiter.rasiIndex)) {
-    panchaMahapurushaYogas.push({
-      yogaName: 'ஹம்ச யோகம் (Hamsa Yoga)',
+      yogaName: 'ஹம்ச யோகம் (Hamsa Yoga - குரு மகாபுருஷ யோகம்)',
       planetTamil: 'குரு',
       rasiTamil: jupiter.rasiTamil,
-      description: 'பராசரர் முறைப்படி குரு கேந்திரத்தில் ஆட்சி அல்லது உச்சம் பெற்று உருவான உயர்ந்த ஞானம், ஆசீர்வாதம், ஆன்மீக மேன்மை தரும் பஞ்ச மகாபுருஷ யோகம்.',
+      description: 'குரு பகவான் கேந்திரத்தில் ஆட்சி/உச்சம் பெற்றதால் உயரிய தர்ம சிந்தனை, கல்வி ஞானம், மக்கள் செல்வாக்கு மற்றும் தெய்வ கடாட்சம் உண்டாகும்.',
     });
   }
 
-  // 4. Malavya Yoga (Venus in Kendra in Rishabam 1, Thulam 6, Meenam 11)
-  if (kendraRasiIndices.includes(venus.rasiIndex) && [1, 6, 11].includes(venus.rasiIndex)) {
+  // Venus -> Malavya Yoga (Rishabam, Thulam, Meenam)
+  const venus = calculatedPlanets.find((p) => p.name === 'Venus');
+  if (venus && kendraRasis.includes(venus.rasiIndex) && [1, 6, 11].includes(venus.rasiIndex)) {
     panchaMahapurushaYogas.push({
-      yogaName: 'மாளவ்ய யோகம் (Malavya Yoga)',
+      yogaName: 'மாளவ்ய யோகம் (Malavya Yoga - சுக்கிர மகாபுருஷ யோகம்)',
       planetTamil: 'சுக்கிரன்',
       rasiTamil: venus.rasiTamil,
-      description: 'பராசரர் முறைப்படி சுக்கிரன் கேந்திரத்தில் ஆட்சி அல்லது உச்சம் பெற்று உருவான கலை நயம், வாகன சுகம், இல்லற இன்பம் தரும் பஞ்ச மகாபுருஷ யோகம்.',
+      description: 'சுக்கிரன் கேந்திரத்தில் ஆட்சி/உச்சம் பெற்றதால் சகல போக பாக்கியங்கள், வாகன யோகம், கலை ஆர்வம் மற்றும் வசீகர ஆளுமை கிட்டும்.',
     });
   }
 
-  // 5. Sasa Yoga (Saturn in Kendra in Thulam 6, Makaram 9, Kumbam 10)
-  if (kendraRasiIndices.includes(saturn.rasiIndex) && [6, 9, 10].includes(saturn.rasiIndex)) {
+  // Saturn -> Sasa Yoga (Makaram, Kumbam, Thulam)
+  const saturn = calculatedPlanets.find((p) => p.name === 'Saturn');
+  if (saturn && kendraRasis.includes(saturn.rasiIndex) && [9, 10, 6].includes(saturn.rasiIndex)) {
     panchaMahapurushaYogas.push({
-      yogaName: 'சச யோகம் (Sasa Yoga)',
+      yogaName: 'சச யோகம் (Sasa Yoga - சனி மகாபுருஷ யோகம்)',
       planetTamil: 'சனி',
       rasiTamil: saturn.rasiTamil,
-      description: 'பராசரர் முறைப்படி சனி கேந்திரத்தில் ஆட்சி அல்லது உச்சம் பெற்று உருவான விடாமுயற்சி, மக்கள் செல்வாக்கு, நீண்ட ஆயுள் தரும் பஞ்ச மகாபுருஷ யோகம்.',
+      description: 'சனி பகவான் கேந்திரத்தில் ஆட்சி/உச்சம் பெற்றதால் நீண்ட ஆயுள், மக்கள் மத்தியில் தனிப்பெரும் நன்மதிப்பு மற்றும் உழைப்பால் உயரும் பாக்கியம் உண்டாகும்.',
     });
   }
 
-  // Parasara Graha Drishti (Aspects)
-  const computeParasaraAspects = (p: PlanetaryPosition) => {
-    let aspectOffsets = [7]; // All planets aspect 7th
-    if (p.name === 'Mars') aspectOffsets = [4, 7, 8];
-    else if (p.name === 'Jupiter') aspectOffsets = [5, 7, 9];
-    else if (p.name === 'Saturn') aspectOffsets = [3, 7, 10];
-    else if (p.name === 'Rahu' || p.name === 'Ketu') aspectOffsets = [5, 7, 9];
-
-    const aspectedHouses: number[] = [];
-    const aspectedRasis: string[] = [];
-
-    aspectOffsets.forEach((offset) => {
-      const targetRasiIdx = (p.rasiIndex + (offset - 1)) % 12;
-      let targetHouse = targetRasiIdx - lagna.rasiIndex + 1;
-      if (targetHouse <= 0) targetHouse += 12;
-      aspectedHouses.push(targetHouse);
-      aspectedRasis.push(TAMIL_RASIS[targetRasiIdx].tamil);
+  // Mercury -> Bhadra Yoga (Mithunam, Kanni)
+  const mercury = calculatedPlanets.find((p) => p.name === 'Mercury');
+  if (mercury && kendraRasis.includes(mercury.rasiIndex) && [2, 5].includes(mercury.rasiIndex)) {
+    panchaMahapurushaYogas.push({
+      yogaName: 'பத்ர யோகம் (Bhadra Yoga - புதன் மகாபுருஷ யோகம்)',
+      planetTamil: 'புதன்',
+      rasiTamil: mercury.rasiTamil,
+      description: 'புதன் கேந்திரத்தில் ஆட்சி/உச்சம் பெற்று திகழ்வதால் கூரிய புத்தி கூர்மை, வாக்கு சாதுரியம், வணிக வெற்றி மற்றும் கல்வி மேன்மை அமையும்.',
     });
+  }
 
-    return {
+  // Parasara Drishti (Special planetary aspects)
+  const parasaraDrishti: { planetTamil: string; aspectedHouses: number[]; aspectedRasis: string[] }[] = [];
+  for (const p of calculatedPlanets) {
+    if (['Rahu', 'Ketu'].includes(p.name)) continue;
+    const pHouseFromLagna = ((p.rasiIndex - lagnaRasiIdx + 12) % 12) + 1;
+    const aspectHouses: number[] = [];
+
+    // All planets aspect 7th
+    aspectHouses.push(((pHouseFromLagna + 6 - 1) % 12) + 1);
+
+    // Mars special 4, 8
+    if (p.name === 'Mars') {
+      aspectHouses.push(((pHouseFromLagna + 3 - 1) % 12) + 1);
+      aspectHouses.push(((pHouseFromLagna + 7 - 1) % 12) + 1);
+    }
+    // Jupiter special 5, 9
+    if (p.name === 'Jupiter') {
+      aspectHouses.push(((pHouseFromLagna + 4 - 1) % 12) + 1);
+      aspectHouses.push(((pHouseFromLagna + 8 - 1) % 12) + 1);
+    }
+    // Saturn special 3, 10
+    if (p.name === 'Saturn') {
+      aspectHouses.push(((pHouseFromLagna + 2 - 1) % 12) + 1);
+      aspectHouses.push(((pHouseFromLagna + 9 - 1) % 12) + 1);
+    }
+
+    const uniqueHouses = Array.from(new Set(aspectHouses)).sort((a, b) => a - b);
+    parasaraDrishti.push({
       planetTamil: p.tamilName,
-      aspectedHouses,
-      aspectedRasis,
-    };
-  };
-
-  const parasaraDrishti = allPlanets
-    .filter((p) => p.name !== 'Lagna')
-    .map(computeParasaraAspects);
+      aspectedHouses: uniqueHouses,
+      aspectedRasis: uniqueHouses.map((h) => TAMIL_RASIS[getHouseRasiIdx(h)].tamil),
+    });
+  }
 
   const parasara: ParasaraDetails = {
     method: 'Brihat Parasara Hora Sastra (BPHS)',
@@ -601,9 +806,9 @@ export function calculateAstrologyData(
     dusthanas,
     marakas,
     badhaka: {
-      house: badhakaHouse,
-      rasiTamil: badhakaInfo.rasiTamil,
-      lordTamil: badhakaInfo.lordTamil,
+      house: badhakaHouseNum,
+      rasiTamil: TAMIL_RASIS[badhakaRasiIdx].tamil,
+      lordTamil: TAMIL_RASIS[badhakaRasiIdx].lord,
       typeTamil: badhakaType,
     },
     vargottamaPlanets,
@@ -611,88 +816,41 @@ export function calculateAstrologyData(
     parasaraDrishti,
   };
 
-  // --- KRISHNAMURTI PADDHATI (KP SYSTEM) COMPUTATIONS ---
-  const VIMSHOTTARI_DASA_ORDER = [
-    { lord: 'கேது', years: 7 },
-    { lord: 'சுக்கிரன்', years: 20 },
-    { lord: 'சூரியன்', years: 6 },
-    { lord: 'சந்திரன்', years: 10 },
-    { lord: 'செவ்வாய்', years: 7 },
-    { lord: 'ராகு', years: 18 },
-    { lord: 'குரு', years: 16 },
-    { lord: 'சனி', years: 19 },
-    { lord: 'புதன்', years: 17 },
-  ];
-
-  const getKpSignStarSub = (siderealLongitude: number) => {
-    const normLong = normalizeDeg(siderealLongitude);
-    const rasiIdx = Math.floor(normLong / 30);
-    const signLord = TAMIL_RASIS[rasiIdx].lord;
-
-    const nakTotalDeg = 360 / 27; // 13.333333 deg = 800 min
-    const nakIdx = Math.floor(normLong / nakTotalDeg);
-    const starLord = TAMIL_NAKSHATRAS[nakIdx].lord;
-
-    const nakProgressionMin = (normLong % nakTotalDeg) * 60; // 0 to 800 min
-
-    const startLordIdx = VIMSHOTTARI_DASA_ORDER.findIndex((v) => v.lord === starLord);
-    let accumMin = 0;
-    let subLord = starLord;
-
-    for (let i = 0; i < 9; i++) {
-      const vIdx = (startLordIdx + i) % 9;
-      const subSpanMin = (VIMSHOTTARI_DASA_ORDER[vIdx].years / 120) * 800;
-      accumMin += subSpanMin;
-      if (nakProgressionMin <= accumMin) {
-        subLord = VIMSHOTTARI_DASA_ORDER[vIdx].lord;
-        break;
-      }
-    }
-
-    return { signLord, starLord, subLord };
-  };
-
-  const kpPlanets: KpPlanetInfo[] = allPlanets.map((p) => {
-    const { signLord, starLord, subLord } = getKpSignStarSub(p.longitude);
+  // 8. KP Details (Sub-Lords, Cusps & Ruling Planets)
+  const kpPlanets: KpPlanetInfo[] = calculatedPlanets.map((p) => {
+    const { starLord, subLord } = getKpSubLord(p.longitude);
     return {
       planetTamil: p.tamilName,
-      signLordTamil: signLord,
+      signLordTamil: p.signLordTamil,
       starLordTamil: starLord,
       subLordTamil: subLord,
-      degreeStr: `${p.degreeInRasi}° (${p.rasiTamil})`,
+      degreeStr: `${p.rasiTamil} ${p.degMinStr}`,
     };
   });
 
   const kpCusps: KpCuspInfo[] = [];
-  for (let c = 1; c <= 12; c++) {
-    const cuspLong = normalizeDeg(lagna.longitude + (c - 1) * 30);
-    const rasiIdx = Math.floor(cuspLong / 30);
-    const { signLord, starLord, subLord } = getKpSignStarSub(cuspLong);
+  for (let h = 1; h <= 12; h++) {
+    const rIdx = getHouseRasiIdx(h);
+    const cuspLong = normalizeDeg(lagnaSidLong + (h - 1) * 30);
+    const { starLord, subLord } = getKpSubLord(cuspLong);
     kpCusps.push({
-      cuspNumber: c,
-      rasiTamil: TAMIL_RASIS[rasiIdx].tamil,
-      signLord,
+      cuspNumber: h,
+      rasiTamil: TAMIL_RASIS[rIdx].tamil,
+      signLord: TAMIL_RASIS[rIdx].lord,
       starLord,
       subLord,
     });
   }
 
-  // KP Ruling Planets (ஆளும் கிரகங்கள்)
-  const DAY_LORDS: { [day: string]: string } = {
-    'ஞாயிறு': 'சூரியன்',
-    'திங்கள்': 'சந்திரன்',
-    'செவ்வாய்': 'செவ்வாய்',
-    'புதன்': 'புதன்',
-    'வியாழன்': 'குரு',
-    'வெள்ளி': 'சுக்கிரன்',
-    'சனி': 'சனி',
-  };
+  const { starLord: moonStarLord } = getKpSubLord(moonPos.longitude);
+  const { starLord: lagnaStarLord } = getKpSubLord(lagnaSidLong);
+
   const kpRulingPlanets: KpRulingPlanets = {
-    dayLord: DAY_LORDS[dayTamil] || 'சூரியன்',
-    moonSignLord: TAMIL_RASIS[moon.rasiIndex].lord,
-    moonStarLord: TAMIL_NAKSHATRAS[moon.nakshatraIndex].lord,
-    lagnaSignLord: TAMIL_RASIS[lagna.rasiIndex].lord,
-    lagnaStarLord: TAMIL_NAKSHATRAS[lagna.nakshatraIndex].lord,
+    dayLord: dayTamil,
+    moonSignLord: moonPos.signLordTamil,
+    moonStarLord,
+    lagnaSignLord: lagnaPosition.signLordTamil,
+    lagnaStarLord,
   };
 
   const kp: KpDetails = {
@@ -700,65 +858,74 @@ export function calculateAstrologyData(
     planets: kpPlanets,
     cusps: kpCusps,
     rulingPlanets: kpRulingPlanets,
-    keyRuleTamil: 'கிரகம் காரகத்தின் மூலம், நட்சத்திர நாதன் பலனின் தரம், உப நாதன் (Sub-Lord) காரிய சித்தி முடிவை நிர்ணயிக்கிறார்.',
+    keyRuleTamil: 'கிரகம் காரகன், நட்சத்திர நாதன் பலன் தருபவர், உப நாதன் (Sub-Lord) காரிய சித்தியைத் தீர்மானிப்பவர்.',
   };
 
-  // --- JAIMINI ASTROLOGY SUTRAS COMPUTATIONS ---
-  // 7 traditional planets for Chara Karakas: Sun, Moon, Mars, Mercury, Jupiter, Venus, Saturn
-  const jaiminiPhysicalPlanets = [sun, moon, mars, mercury, jupiter, venus, saturn];
-  // Sort descending by degree within rasi
-  const sortedJaimini = [...jaiminiPhysicalPlanets].sort((a, b) => b.degreeInRasi - a.degreeInRasi);
+  // 9. Jaimini Details (7 Chara Karakas, Karakamsha, Upapada & Rasi Drishti)
+  const nonNodePlanets = calculatedPlanets.filter((p) => p.name !== 'Rahu' && p.name !== 'Ketu');
+  const sortedByDegree = [...nonNodePlanets].sort((a, b) => b.degreeInRasi - a.degreeInRasi);
 
-  const KARAKA_DEFINITIONS: {
-    code: 'AK' | 'AmK' | 'BK' | 'MK' | 'PK' | 'GK' | 'DK';
-    tamilName: string;
+  const KARAKA_ROLES: {
+    code: JaiminiKarakaInfo['karakaCode'];
+    nameTamil: string;
     significance: string;
   }[] = [
-    { code: 'AK', tamilName: 'ஆத்மகாரகன் (Atmakaraka)', significance: 'ஆன்ம காரகன், பிரதான தலைவிதி மற்றும் வாழ்க்கை நோக்கம்' },
-    { code: 'AmK', tamilName: 'அமாத்யகாரகன் (Amatyakaraka)', significance: 'தொழில், கர்மம், நிதி, செல்வாக்கு மற்றும் சமூக அந்தஸ்து' },
-    { code: 'BK', tamilName: 'ப்ராத்ருகாரகன் (Bhratrikaraka)', significance: 'சகோதரம், மன தைரியம், ஆன்மீக குரு மற்றும் வழிகாட்டி' },
-    { code: 'MK', tamilName: 'மாத்ருகாரகன் (Matrikaraka)', significance: 'தாய், சுக பாவம், குடும்ப அமைதி, வாகனம் மற்றும் கல்வி' },
-    { code: 'PK', tamilName: 'புத்ரகாரகன் (Putrakaraka)', significance: 'புத்திர பாக்கியம், ஆழ்ந்த அறிவு, புத்தி கூர்மை மற்றும் யோகம்' },
-    { code: 'GK', tamilName: 'ஞானிகாரகன் (Gnatikaraka)', significance: 'எதிர்ப்புகள், தடைகள், நோய்கள், கடன்கள் மற்றும் போட்டி' },
-    { code: 'DK', tamilName: 'தாரகாரகன் (Darakaraka)', significance: 'வாழ்க்கைத்துணை, களத்திர பாவம், இல்லற இன்பம் மற்றும் கூட்டு' },
+    { code: 'AK', nameTamil: 'ஆத்மகாரகன் (Atmakaraka)', significance: 'ஆன்மாவின் உயரிய நோக்கம், விருப்பம் மற்றும் தலைமை' },
+    { code: 'AmK', nameTamil: 'அமாத்யகாரகன் (Amatyakaraka)', significance: 'தொழில், புத்தி கூர்மை, பதவி மற்றும் நிர்வாக மேன்மை' },
+    { code: 'BK', nameTamil: 'பிராத்ருகாரகன் (Bhratrukaraka)', significance: 'உடன்பிறந்தோரின் ஆதரவு, தைரியம் மற்றும் குருவருள்' },
+    { code: 'MK', nameTamil: 'மாத்ருகாரகன் (Matrukaraka)', significance: 'தாயன்பு, கல்வி, சுகபோகம் மற்றும் வாகன யோகம்' },
+    { code: 'PK', nameTamil: 'பித்ருகாரகன் (Pitrukaraka)', significance: 'தந்தை, பூர்வபுண்ணியம் மற்றும் தர்ம சிந்தனை' },
+    { code: 'GK', nameTamil: 'ஞானிகாரகன் (Jnatikaraka)', significance: 'நோய் எதிர்ப்பு ஆற்றல், தடைகளை வெல்லும் சாமர்த்தியம்' },
+    { code: 'DK', nameTamil: 'தாரகாரகன் (Darakaraka)', significance: 'வாழ்க்கைத்துணை, குடும்ப அமைதி மற்றும் கூட்டாண்மை' },
   ];
 
-  const charaKarakas: JaiminiKarakaInfo[] = sortedJaimini.map((p, idx) => ({
-    karakaNameTamil: KARAKA_DEFINITIONS[idx].tamilName,
-    karakaCode: KARAKA_DEFINITIONS[idx].code,
+  const charaKarakas: JaiminiKarakaInfo[] = sortedByDegree.slice(0, 7).map((p, idx) => ({
+    karakaNameTamil: KARAKA_ROLES[idx].nameTamil,
+    karakaCode: KARAKA_ROLES[idx].code,
     planetTamil: p.tamilName,
     degreeInRasi: p.degreeInRasi,
-    significanceTamil: KARAKA_DEFINITIONS[idx].significance,
+    significanceTamil: KARAKA_ROLES[idx].significance,
   }));
 
-  // Karakamsha (Navamsa sign of Atmakaraka)
-  const atmakaraka = sortedJaimini[0];
-  const karakamshaRasi = atmakaraka.navamsaRasiTamil;
+  // Karakamsha (Navamsha sign of Atmakaraka)
+  const atmakaraka = sortedByDegree[0];
+  const karakamshaRasi = atmakaraka ? atmakaraka.navamsaRasiTamil : 'மேஷம்';
 
-  // Upapada Lagna (Arudha of 12th house: count distance from 12th house to 12th lord, then same distance forward)
-  const h12RasiIdx = (lagna.rasiIndex + 11) % 12;
-  const h12LordTamil = TAMIL_RASIS[h12RasiIdx].lord;
-  const h12LordPlanet = allPlanets.find((p) => p.tamilName === h12LordTamil) || jupiter;
-  const dist12 = (h12LordPlanet.rasiIndex - h12RasiIdx + 12) % 12;
-  const upapadaRasiIdx = (h12LordPlanet.rasiIndex + dist12) % 12;
+  // Upapada Lagna (Arudha of 12th house: A12)
+  const house12RasiIdx = getHouseRasiIdx(12);
+  const house12Lord = TAMIL_RASIS[house12RasiIdx].lord;
+  const house12LordPlanet = calculatedPlanets.find((p) => p.tamilName === house12Lord);
+  let upapadaRasiIdx = house12RasiIdx;
+  if (house12LordPlanet) {
+    const dist = (house12LordPlanet.rasiIndex - house12RasiIdx + 12) % 12;
+    upapadaRasiIdx = (house12LordPlanet.rasiIndex + dist) % 12;
+  }
   const upapadaLagnaRasi = TAMIL_RASIS[upapadaRasiIdx].tamil;
 
-  // Jaimini Rasi Drishti Summary
-  // Movable (0,3,6,9) aspects Fixed (1,4,7,10) except adjacent
-  // Fixed aspects Movable except adjacent
-  // Dual (2,5,8,11) aspects all other Dual
-  const rasiDrishtiSummary = [
-    { rasiTamil: 'சர ராசிகள் (மேஷம், கடகம், துலாம், மகரம்)', aspectedRasisTamil: ['அருகிலுள்ளதைத் தவிர்த்த அனைத்து ஸ்திர ராசிகள் (ரிஷபம், சிம்மம், விருச்சிகம், கும்பம்)'] },
-    { rasiTamil: 'ஸ்திர ராசிகள் (ரிஷபம், சிம்மம், விருச்சிகம், கும்பம்)', aspectedRasisTamil: ['அருகிலுள்ளதைத் தவிர்த்த அனைத்து சர ராசிகள் (மேஷம், கடகம், துலாம், மகரம்)'] },
-    { rasiTamil: 'உபய ராசிகள் (மிதுனம், கன்னி, தனுசு, மீனம்)', aspectedRasisTamil: ['பிற அனைத்து உபய ராசிகளையும் பார்க்கும் (மிதுனம், கன்னி, தனுசு, மீனம்)'] },
-  ];
-
-  // Jaimini Chara Dasa Sequence from Lagna
-  const charaDasaOrder: string[] = [];
-  for (let i = 0; i < 12; i++) {
-    const rIdx = (lagna.rasiIndex + i) % 12;
-    charaDasaOrder.push(TAMIL_RASIS[rIdx].tamil);
-  }
+  // Jaimini Rasi Drishti:
+  // Chara (0,3,6,9) aspect Sthira (1,4,7,10) except adjacent
+  // Sthira aspect Chara except adjacent
+  // Ubhaya (2,5,8,11) aspect each other
+  const rasiDrishtiSummary = TAMIL_RASIS.map((r, rIdx) => {
+    const aspected: string[] = [];
+    if ([0, 3, 6, 9].includes(rIdx)) {
+      // Chara
+      [1, 4, 7, 10].forEach((target) => {
+        if (target !== (rIdx + 1) % 12) aspected.push(TAMIL_RASIS[target].tamil);
+      });
+    } else if ([1, 4, 7, 10].includes(rIdx)) {
+      // Sthira
+      [0, 3, 6, 9].forEach((target) => {
+        if (target !== (rIdx + 11) % 12) aspected.push(TAMIL_RASIS[target].tamil);
+      });
+    } else {
+      // Ubhaya
+      [2, 5, 8, 11].forEach((target) => {
+        if (target !== rIdx) aspected.push(TAMIL_RASIS[target].tamil);
+      });
+    }
+    return { rasiTamil: r.tamil, aspectedRasisTamil: aspected };
+  });
 
   const jaimini: JaiminiDetails = {
     method: 'Jaimini Astrology Sutras',
@@ -766,43 +933,46 @@ export function calculateAstrologyData(
     karakamshaRasi,
     upapadaLagnaRasi,
     rasiDrishtiSummary,
-    charaDasaOrder,
+    charaDasaOrder: TAMIL_RASIS.map((r) => r.tamil),
   };
 
   return {
     rasiChart,
     navamsaChart,
-    lagna,
-    moon,
-    sun,
-    planets: allPlanets,
+    lagna: lagnaPosition,
+    moon: moonPos,
+    sun: sunPos,
+    planets: calculatedPlanets,
     nakshatra: {
-      index: moon.nakshatraIndex,
-      tamil: moon.nakshatraTamil,
-      english: moon.nakshatraName,
-      lordTamil: currentNakInfo.lord,
-      pada: moon.pada,
+      index: moonPos.nakshatraIndex,
+      tamil: moonPos.nakshatraTamil,
+      english: moonPos.nakshatraName,
+      lordTamil: moonPos.starLordTamil,
+      pada: moonPos.pada,
     },
     rasi: {
-      index: moon.rasiIndex,
-      tamil: moon.rasiTamil,
-      english: moon.rasiName,
-      lordTamil: TAMIL_RASIS[moon.rasiIndex].lord,
+      index: moonPos.rasiIndex,
+      tamil: moonPos.rasiTamil,
+      english: moonPos.rasiName,
+      lordTamil: moonPos.signLordTamil,
     },
     lagnaRasi: {
-      index: lagna.rasiIndex,
-      tamil: lagna.rasiTamil,
-      english: lagna.rasiName,
-      lordTamil: TAMIL_RASIS[lagna.rasiIndex].lord,
+      index: lagnaPosition.rasiIndex,
+      tamil: lagnaPosition.rasiTamil,
+      english: lagnaPosition.rasiName,
+      lordTamil: lagnaPosition.signLordTamil,
     },
     dasaBalance,
+    dasaTimeline,
     panchangam: {
       tithiTamil,
       tithiPaksha,
+      tithiNumber,
       yogamTamil,
       karanamTamil,
       dayTamil,
-      ayanamsamValue: Number(ayanamsha.toFixed(2)),
+      ayanamsamValue: Number(ayanamsha.toFixed(4)),
+      ayanamsamStr: formatAyanamsha(ayanamsha),
     },
     parasara,
     kp,

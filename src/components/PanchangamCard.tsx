@@ -16,8 +16,8 @@ export const PanchangamCard: React.FC<PanchangamCardProps> = ({ data }) => {
           <Compass className="w-5 h-5 text-[#b8860b]" />
           <span>பிறந்த பஞ்சாங்கக் குறிப்புகள்</span>
         </h3>
-        <span className="text-xs text-[#8c674e]">
-          ஆயனாம்சம்: லஹரி {data.panchangam.ayanamsamValue}°
+        <span className="text-xs text-[#8c674e] font-semibold">
+          அயனாம்சம்: {data.panchangam.ayanamsamStr}
         </span>
       </div>
 
@@ -34,8 +34,8 @@ export const PanchangamCard: React.FC<PanchangamCardProps> = ({ data }) => {
           <div className="text-sm md:text-base font-bold text-[#4a1c0d] mt-1">
             {data.lagnaRasi.tamil}
           </div>
-          <div className="text-[10px] text-[#785942] truncate">
-            அதிபதி: {data.lagnaRasi.lordTamil} ({data.lagna.degreeInRasi}°)
+          <div className="text-[10px] text-[#785942] truncate font-mono">
+            அதிபதி: {data.lagnaRasi.lordTamil} ({data.lagna.degMinStr})
           </div>
         </div>
 

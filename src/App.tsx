@@ -294,13 +294,16 @@ export default function App() {
                   />
                 </div>
 
-                {/* 3. Rasi & Navamsa South Indian Grids */}
+                {/* 3. Rasi & Navamsa South Indian Grids, Planetary Table & Dasa Timeline */}
                 <div id="chart-section">
                   <RasiGridChart
                     rasiChart={calculatedData.rasiChart}
                     navamsaChart={calculatedData.navamsaChart}
                     lagnaRasiIndex={calculatedData.lagnaRasi.index}
                     personName={currentInput?.name}
+                    allPlanets={calculatedData.planets}
+                    dasaTimeline={calculatedData.dasaTimeline}
+                    ayanamshaStr={calculatedData.panchangam.ayanamsamStr}
                   />
                 </div>
 
